@@ -1,2 +1,3 @@
-# saps_robot
-Secondary Accident Prevention System - Mobile Robot
+# Capstone Design Project
+## saps_robot
+- Secondary Accident Prevention System - Mobile Robot
