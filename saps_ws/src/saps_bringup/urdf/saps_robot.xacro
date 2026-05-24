@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<robot name="saps_robot" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- 로봇 크기 속성 (단위: m) -->
+  <xacro:property name="base_width" value="0.155"/>
+  <xacro:property name="base_length" value="0.29"/>
+  <xacro:property name="base_height" value="0.061"/>
+  <xacro:property name="wheel_radius" value="0.041"/>
+  <xacro:property name="wheel_width" value="0.0375"/>
+  
+  <!-- 바퀴 중심 위치 (MecanumbaseNode의 lx=0.096, ly=0.0875와 동일) -->
+  <xacro:property name="wheel_offset_x" value="0.096"/>
+  <xacro:property name="wheel_offset_y" value="0.0875"/>
+
+  <!-- 로봇 몸체 (base_link) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="${base_length} ${base_width} ${base_height}"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.1 0.3 0.8 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${base_length} ${base_width} ${base_height}"/>
+      </geometry>
+    </collision>
+  </link>
+
+  
+  <!-- 메카넘 휠 생성 매크로 -->
+  <xacro:macro name="mecanum_wheel" params="prefix x_reflect y_reflect">
+    <link name="${prefix}_wheel_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <material name="gray">
+          <color rgba="0.4 0.4 0.4 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${prefix}_wheel_link"/>
+      <origin xyz="${x_reflect * wheel_offset_x} ${y_reflect * wheel_offset_y} -0.015" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- 4개 바퀴 인스턴스화 (FL, FR, RL, RR) -->
+  <xacro:mecanum_wheel prefix="fl" x_reflect="1" y_reflect="1" />
+  <xacro:mecanum_wheel prefix="fr" x_reflect="1" y_reflect="-1" />
+  <xacro:mecanum_wheel prefix="rl" x_reflect="-1" y_reflect="1" />
+  <xacro:mecanum_wheel prefix="rr" x_reflect="-1" y_reflect="-1" />
+
+  <link name="imu_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.016 0.020 0.001"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.016 0.020 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 ${base_height/2 - 0.002}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ############ SENSORS ############ -->
+
+  <!-- Intel RealSense D455 Camera -->
+  <!-- 1. 카메라 외형의 정중앙을 나타내는 링크 (시각적 박스를 여기에 둡니다) -->
+  <link name="camera_center_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.025 0.110 0.025"/> <!-- D455 실제 크기 -->
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="camera_center_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_center_link"/>
+    <!-- 로봇 앞쪽 중앙, 몸체 위 5cm에 위치. 실제 부착 위치에 맞게 자로 재서 수정하세요! -->
+    <origin xyz="${base_length/2 - 0.02} 0 ${base_height/2 + 0.02}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 2. RealSense 드라이버가 기준점으로dd 사용하는 실제 '왼쪽 뎁스 렌즈'의 위치 -->
+  <link name="camera_link"/>
+  <joint name="camera_lens_joint" type="fixed">
+    <parent link="camera_center_link"/>
+    <child link="camera_link"/>
+    <!-- D455는 정중앙에서 왼쪽(y축 양의방향)으로 4.75cm 떨어진 곳에 기준 뎁스 렌즈가 있습니다 -->
+    <origin xyz="0 0.0475 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

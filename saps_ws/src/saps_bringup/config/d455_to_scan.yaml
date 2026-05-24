@@ -1,0 +1,7 @@
+depthimage_to_laserscan_node:
+  ros__parameters:
+    scan_time: 0.0333        # 1/30Hz, 카메라 프레임 속도와 일치
+    range_min: 0.20          # 스캔 최소 거리 (m)
+    range_max: 5.0           # 스캔 최대 거리 (m)
+    scan_height: 300          # 스캔으로 변환할 Depth 이미지의 중앙 높이 (픽셀 단위)
+    output_frame: camera_link # 스캔 데이터의 기준 프레임
