@@ -27,6 +27,7 @@ setup(
             'mecanum_base_node = saps_base.mecanumBaseNode:main',
             'mpu6050_node = saps_base.mpu6050_node:main',
             'uwb_receiver_node = saps_base.uwb_receiver_node:main',
+            'icm20948_node = saps_base.icm20948_node:main',
         ],
     },
 )

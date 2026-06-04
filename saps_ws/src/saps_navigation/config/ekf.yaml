@@ -21,7 +21,7 @@ ekf_filter_node_odom:
 
     # 2. IMU 센서 데이터
     imu0: imu/data
-    # Yaw 각속도(Vw)만 신뢰하여 사용합니다. (MPU6050은 Raw 절대 각도를 제공하지 않으므로 Yaw 각도는 false 처리)
+    # 지자기 센서가 보정한 절대 Yaw(6번째 항목)와 Yaw 각속도를 신뢰하여 사용합니다.
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,
@@ -31,41 +31,41 @@ ekf_filter_node_odom:
     imu0_remove_gravitational_acceleration: true
 
 
-ekf_filter_node_map:
-  ros__parameters:
-    frequency: 30.0
-    two_d_mode: true
-    publish_tf: true
+# ekf_filter_node_map:
+#   ros__parameters:
+#     frequency: 30.0
+#     two_d_mode: true
+#     publish_tf: true
     
-    map_frame: map
-    odom_frame: odom
-    base_link_frame: base_link
-    world_frame: map  # ★ UWB를 이용해 map -> odom TF를 발행하도록 설정
+#     map_frame: map
+#     odom_frame: odom
+#     base_link_frame: base_link
+#     world_frame: map  # ★ UWB를 이용해 map -> odom TF를 발행하도록 설정
 
-    # 1. 아두이노에서 가져온 엔코더 오도메트리
-    odom0: odom_raw
-    odom0_config: [false, false, false,  # x, y, z
-                   false, false, false,  # roll, pitch, yaw
-                   true,  true,  false,  # vx, vy, vz
-                   false, false, true,   # vroll, vpitch, vyaw
-                   false, false, false]  # ax, ay, az
-    odom0_relative: false
+#     # 1. 아두이노에서 가져온 엔코더 오도메트리
+#     odom0: odom_raw
+#     odom0_config: [false, false, false,  # x, y, z
+#                    false, false, false,  # roll, pitch, yaw
+#                    true,  true,  false,  # vx, vy, vz
+#                    false, false, true,   # vroll, vpitch, vyaw
+#                    false, false, false]  # ax, ay, az
+#     odom0_relative: false
 
-    # 2. IMU 센서 데이터
-    imu0: imu/data
-    imu0_config: [false, false, false,
-                  false, false, false,
-                  false, false, false,
-                  false, false, true,
-                  false, false, false]
-    imu0_relative: true
-    imu0_remove_gravitational_acceleration: true
+#     # 2. IMU 센서 데이터
+#     imu0: imu/data
+#     imu0_config: [false, false, false,
+#                   false, false, false,
+#                   false, false, false,
+#                   false, false, true,
+#                   false, false, false]
+#     imu0_relative: true
+#     imu0_remove_gravitational_acceleration: true
 
-    # 3. UWB 센서 데이터 (Global EKF에서만 퓨전)
-    pose0: uwb/pose
-    pose0_config: [true,  true,  false,
-                   false, false, false,
-                   false, false, false,
-                   false, false, false,
-                   false, false, false]
-    pose0_relative: false
+#     # 3. UWB 센서 데이터 (Global EKF에서만 퓨전)
+#     pose0: uwb/pose
+#     pose0_config: [true,  true,  false,
+#                    false, false, false,
+#                    false, false, false,
+#                    false, false, false,
+#                    false, false, false]
+#     pose0_relative: false
