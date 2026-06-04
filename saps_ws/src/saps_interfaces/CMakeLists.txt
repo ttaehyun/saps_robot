@@ -8,6 +8,14 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(action_msgs REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "action/RoverCommand.action"
+  DEPENDENCIES action_msgs
+)
+
+ament_export_dependencies(rosidl_default_runtime)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

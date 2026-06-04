@@ -1,0 +1,9 @@
+string command
+float32 x
+float32 y
+---
+bool success
+string message
+---
+string status
+float32 progress
