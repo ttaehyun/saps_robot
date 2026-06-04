@@ -12,8 +12,8 @@ slam_toolbox:
     # ROS Parameters
     odom_frame: odom
     map_frame: map
-    base_frame: base_footprint
-    scan_topic: /scan
+    base_frame: base_link
+    scan_topic: /rover/scan
     use_map_saver: true
     mode: mapping #localization
 
@@ -21,7 +21,7 @@ slam_toolbox:
     # or at the dock, but they are mutually exclusive, if pose is given
     # will use pose
     #map_file_name: test_steve
-    # map_start_pose: [0.0, 0.0, 0.0]
+    map_start_pose: [0.0, 0.0, 0.0]
     #map_start_at_dock: true
 
     debug_logging: false

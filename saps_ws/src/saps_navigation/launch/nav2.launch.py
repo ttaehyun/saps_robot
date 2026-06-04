@@ -12,6 +12,9 @@ def generate_launch_description():
     # 2단계에서 다운로드 및 수정한 파라미터 파일 경로
     nav2_params_path = os.path.join(saps_nav_dir, 'config', 'nav2_params.yaml')
 
+    # 저장하고 수정한 맵 파일 경로
+    map_path = os.path.join(os.path.expanduser('~'), 'map.yaml')
+
     return LaunchDescription([
         # 1. 실시간 매핑 및 위치 인식 (SLAM Toolbox)
         Node(
@@ -31,7 +34,7 @@ def generate_launch_description():
             remappings=[('/scan', '/rover/scan')]
         ),
         
-        # 2. Nav2 Navigation 스택 (경로 계획, 장애물 회피, 모터 제어 명령 하달)
+        # 2. Nav2 Navigation 스택 (SLAM 맵 생성 중에는 map_server가 필요 없으므로 navigation_launch.py 사용)
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(nav2_bringup_dir, 'launch', 'navigation_launch.py')),
             launch_arguments={
