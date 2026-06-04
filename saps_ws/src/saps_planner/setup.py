@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'saps_server'
+package_name = 'saps_planner'
 
 setup(
     name=package_name,
@@ -24,8 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'task_server = saps_server.task_server:main',
-            'test_server = saps_server.test:main',
+            'task_server = saps_planner.task_server:main',
+            'test_server = saps_planner.test:main',
         ],
     },
 )

@@ -6,7 +6,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 
 # saps_interfaces에서 빌드한 RobotTask 액션을 임포트
-from saps_interfaces.action import RobotTask
+from saps_interfaces.action import RoverCommand
 
 class LocalTaskPlanner(Node):
     def __init__(self):
@@ -17,58 +17,60 @@ class LocalTaskPlanner(Node):
         
         self._action_server = ActionServer(
             self,
-            RobotTask,
-            'robot_task',              # Action 통신을 위한 토픽(이름)
+            RoverCommand,
+            '/rover_command',              # Action 통신을 위한 토픽(이름)
             execute_callback=self.execute_callback,
             callback_group=self.callback_group
         )
         self.get_logger().info('Local Task Planner (Director Node) started. Waiting for goals...')
 
     async def execute_callback(self, goal_handle):
-        task_name = goal_handle.request.task_name
-        self.get_logger().info(f'--- Mission Started: {task_name} ---')
+        command = goal_handle.request.command
+        target_x = goal_handle.request.x
+        target_y = goal_handle.request.y
+        self.get_logger().info(f'--- Mission Started: {command} (Target: x={target_x}, y={target_y}) ---')
         
-        feedback_msg = RobotTask.Feedback()
-        result = RobotTask.Result()
+        feedback_msg = RoverCommand.Feedback()
+        result = RoverCommand.Result()
 
         # 요청된 Task 종류에 따라 분기 처리 (State Machine / Sequence)
-        if task_name == 'patrol':
+        if command == 'patrol':
             success = await self.execute_patrol_sequence(goal_handle, feedback_msg)
-        elif task_name == 'delivery':
+        elif command == 'delivery':
             success = await self.execute_delivery_sequence(goal_handle, feedback_msg)
         else:
-            self.get_logger().warn(f'Unknown task requested: {task_name}')
+            self.get_logger().warn(f'Unknown task requested: {command}')
             success = False
             
         # 최종 결과 처리
         if success:
             goal_handle.succeed()
             result.success = True
-            self.get_logger().info(f'--- Mission [{task_name}] Succeeded! ---')
+            self.get_logger().info(f'--- Mission [{command}] Succeeded! ---')
         else:
             goal_handle.abort()
             result.success = False
-            self.get_logger().error(f'--- Mission [{task_name}] Failed or Aborted! ---')
+            self.get_logger().error(f'--- Mission [{command}] Failed or Aborted! ---')
         
         return result
 
     async def execute_patrol_sequence(self, goal_handle, feedback_msg):
         # [시퀀스 1] A 지점 이동 (추후 Nav2 Action Client 호출 로직으로 대체)
-        feedback_msg.current_status = 'Moving to Point A (Nav2...)'
-        feedback_msg.percent_complete = 33.3
+        feedback_msg.status = 'Moving to Point A (Nav2...)'
+        feedback_msg.progress = 33.3
         goal_handle.publish_feedback(feedback_msg)
-        self.get_logger().info(feedback_msg.current_status)
+        self.get_logger().info(feedback_msg.status)
         time.sleep(2.0) # 실제로는 Nav2 이동 완료까지 await로 대기
         
         # [시퀀스 2] 주변 스캔 및 사진 촬영 등 특정 액션
-        feedback_msg.current_status = 'Scanning area...'
-        feedback_msg.percent_complete = 66.6
+        feedback_msg.status = 'Scanning area...'
+        feedback_msg.progress = 66.6
         goal_handle.publish_feedback(feedback_msg)
-        self.get_logger().info(feedback_msg.current_status)
+        self.get_logger().info(feedback_msg.status)
         time.sleep(2.0)
 
-        feedback_msg.current_status = 'Patrol Complete. Returning to standby.'
-        feedback_msg.percent_complete = 100.0
+        feedback_msg.status = 'Patrol Complete. Returning to standby.'
+        feedback_msg.progress = 100.0
         goal_handle.publish_feedback(feedback_msg)
         return True
 
