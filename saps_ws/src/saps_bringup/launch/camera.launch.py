@@ -25,9 +25,8 @@ def generate_launch_description():
                 'camera_name': 'camera',               # xacro의 camera_link와 연결되도록 'camera'로 명시
                 'depth_module.depth_profile' : '848,480,15',
                 'rgb_camera.color_profile': '848,480,15',
-                'pointcloud__neon_.enable': 'true',          # TODO(추후 로봇팔 피킹 시 true로 변경하여 PointCloud 사용)
-                # 'align_depth.enable': 'true',    # 순수 뎁스만 사용하므로 끄기
-
+                'pointcloud__neon_.enable': 'false',         # 픽셀 좌표(u,v) de-projection 방식을 쓰므로 PC는 끕니다
+                'align_depth.enable': 'true',
             }.items()
         ),
 
