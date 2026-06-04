@@ -1,20 +1,20 @@
 import time
 import rclpy
-from rclpy.action import ActionServer
+from rclpy.action import ActionServer, ActionClient
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 
 # saps_interfaces에서 빌드한 RobotTask 액션을 임포트
 from saps_interfaces.action import RoverCommand
-
+from geometry_msgs.msg import PoseStamped
 class LocalTaskPlanner(Node):
     def __init__(self):
         super().__init__('local_task_planner')
         
         # 내부에서 다른 액션/서비스 호출 시 교착 상태를 방지하기 위한 콜백 그룹
         self.callback_group = ReentrantCallbackGroup()
-        
+    
         self._action_server = ActionServer(
             self,
             RoverCommand,
@@ -22,13 +22,15 @@ class LocalTaskPlanner(Node):
             execute_callback=self.execute_callback,
             callback_group=self.callback_group
         )
+
+        self.goal_pose_pub = self.create_publisher(PoseStamped, '/goal_pose', 10)
+
         self.get_logger().info('Local Task Planner (Director Node) started. Waiting for goals...')
 
     async def execute_callback(self, goal_handle):
         command = goal_handle.request.command
-        target_x = goal_handle.request.x
-        target_y = goal_handle.request.y
-        self.get_logger().info(f'--- Mission Started: {command} (Target: x={target_x}, y={target_y}) ---')
+        
+        self.get_logger().info(f'--- Mission Started: {command} ')
         
         feedback_msg = RoverCommand.Feedback()
         result = RoverCommand.Result()
@@ -58,6 +60,9 @@ class LocalTaskPlanner(Node):
         # [시퀀스 1] A 지점 이동 (추후 Nav2 Action Client 호출 로직으로 대체)
         feedback_msg.status = 'Moving to Point A (Nav2...)'
         feedback_msg.progress = 33.3
+        target_x = goal_handle.request.x
+        target_y = goal_handle.request.y
+        self.get_logger().error(f'(Target: x={target_x}, y={target_y}) ---')
         goal_handle.publish_feedback(feedback_msg)
         self.get_logger().info(feedback_msg.status)
         time.sleep(2.0) # 실제로는 Nav2 이동 완료까지 await로 대기
