@@ -1,7 +1,8 @@
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
-from geometry_msgs.msg import PointStamped, Twist
+from geometry_msgs.msg import PointStamped, Twist, Vector3
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -14,7 +15,8 @@ class StoneDetectorNode(Node):
         
         # YOLO 모델 로드 (학습된 가중치 파일 경로로 변경하세요. ex: 'best.pt')
         # 추후 Jetson에서 변환한 'best.engine'을 넣으면 속도가 비약적으로 상승합니다.
-        self.yolo_model = YOLO('yolov8n.pt')
+        #self.yolo_model = YOLO('saps_ws/src/saps_perception/model/best.pt')
+        self.yolo_model = YOLO('/home/a/saps_robot/saps_ws/src/saps_perception/model/best.engine', task='detect')
         
         # Camera Info 캐싱용 변수
         self.camera_info = None
@@ -39,8 +41,17 @@ class StoneDetectorNode(Node):
         self.pub_cmd_vel = self.create_publisher(Twist, '/cmd_vel', 10)
 
         # 제어 목표 상수 설정
-        self.target_z_distance = 0.4  # 돌을 잡기 위한 목표 거리 (미터, 예: 40cm)
+        self.target_z_distance = 0.33  # 돌을 잡기 위한 목표 거리 (미터, 예: 40cm)
         self.image_center_x = 848 / 2 # 이미지 가로 해상도의 절반 (424)
+
+        # PI 제어기용 적분 및 시간 변수
+        self.err_sum_x = 0.0
+        self.err_sum_z = 0.0
+        self.last_time = None
+
+        # PlotJuggler 디버깅용 퍼블리셔
+        self.pub_debug_z = self.create_publisher(Vector3, '/debug/align_z', 10)
+        self.pub_debug_x = self.create_publisher(Vector3, '/debug/align_x', 10)
 
     def cam_info_cb(self, msg):
         # 1회만 받아오면 됩니다. fx, fy, cx, cy 파라미터 추출
@@ -53,13 +64,14 @@ class StoneDetectorNode(Node):
 
     def depth_cb(self, msg):
         # 뎁스 이미지를 numpy 배열로 변환 (보통 16UC1 포맷, 단위는 mm)
-        self.latest_depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+        self.latest_depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='16UC1')
 
     def color_cb(self, msg):
         if self.camera_info is None or self.latest_depth_img is None:
             return
             
-        cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        cv_rgb_raw = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+        cv_image = cv2.cvtColor(cv_rgb_raw, cv2.COLOR_RGB2BGR)
         
         # YOLO 추론 (conf=0.5 등 신뢰도 임계값 설정 가능, verbose=False로 로그 최소화)
         results = self.yolo_model(cv_image, verbose=False, conf=0.5)
@@ -82,9 +94,9 @@ class StoneDetectorNode(Node):
                 break  # 우선 화면에 보이는 돌 하나만 타겟팅 (추후 가장 가까운 돌 등으로 조건 변경 가능)
                 
         # 돌이 탐지되지 않았을 때도 카메라 화면을 업데이트해서 보여주기 위함
-        if not stone_detected:
-            cv2.imshow("Stone Detection", cv_image)
-            cv2.waitKey(1)
+        
+        cv2.imshow("Stone Detection", cv_image)
+        cv2.waitKey(1)
 
     def process_stone_detection(self, u, v, cv_image):
         # 1. Depth 이미지에서 (u, v) 픽셀의 깊이값(mm -> m) 추출
@@ -116,40 +128,74 @@ class StoneDetectorNode(Node):
         # 화면에 그리기용 (디버깅)
         cv2.circle(cv_image, (u, v), 5, (0, 255, 0), -1)
         cv2.putText(cv_image, f"Z: {z:.2f}m", (u+10, v), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        cv2.imshow("Stone Detection", cv_image)
-        cv2.waitKey(1)
+        # cv2.imshow("Stone Detection", cv_image)
+        # cv2.waitKey(1)
 
     def align_rover_to_stone(self, u, z):
-        """돌을 중앙에 맞추고 목표 거리로 이동하는 P 제어기"""
+        """돌을 중앙에 맞추고 목표 거리로 이동하는 PI 제어기"""
         cmd = Twist()
         
-        # 가로 중앙 정렬 에러 (에러가 양수면 돌이 오른쪽에 있음)
-        err_x = self.image_center_x - u
+        now = self.get_clock().now()
+        if self.last_time is None:
+            self.last_time = now
+            return
+            
+        dt = (now - self.last_time).nanoseconds / 1e9  # 초 단위 시간차
+        self.last_time = now
         
-        # 거리 정렬 에러 (에러가 양수면 더 앞으로 가야함)
+        if dt > 1.0: # 타겟을 놓쳤다가 오랜만에 찾은 경우 적분기 초기화
+            self.err_sum_x = 0.0
+            self.err_sum_z = 0.0
+            dt = 0.03
+
+        err_x = self.image_center_x - u
         err_z = z - self.target_z_distance
 
-        # P 제어 게인 (테스트하며 조절 필요)
-        Kp_ang = 0.002
-        Kp_lin = 0.5
-        
-        # 허용 오차 (이 안에 들어오면 정지)
-        if abs(err_x) > 20: # 20픽셀 이상 벗어나면 회전
-            cmd.angular.z = float(err_x * Kp_ang)
+        # 허용 오차 (Deadband) 설정 및 적분(I) 업데이트
+        if abs(err_x) <= 10:
+            err_x = 0.0
+            self.err_sum_x = 0.0  # 목표 도달 시 적분 초기화
         else:
-            cmd.angular.z = 0.0
+            self.err_sum_x += err_x * dt
             
-        if abs(err_z) > 0.05: # 5cm 이상 오차가 나면 직진/후진
-            # 회전 중일때는 직진 속도를 줄여서 안정성 확보
-            cmd.linear.x = float(err_z * Kp_lin) if abs(err_x) <= 50 else 0.0
+        if abs(err_z) <= 0.005:
+            err_z = 0.0
+            self.err_sum_z = 0.0
         else:
-            cmd.linear.x = 0.0
-            
+            self.err_sum_z += err_z * dt
+
+        # Anti-windup (적분기 누적 한계 설정 - 로봇이 미쳐 날뛰는 것 방지)
+        self.err_sum_x = max(-500.0, min(500.0, self.err_sum_x))
+        self.err_sum_z = max(-1.0, min(1.0, self.err_sum_z))
+
+        # PI 제어 게인 (테스트하며 조절 필요)
+        Kp_ang, Ki_ang = 0.001, 0.0
+        Kp_lin, Ki_lin = 0.4, 0.02
+
+        # 제어 명령 계산1
+        if err_x != 0.0:
+            cmd.linear.y = float(err_x * Kp_ang + self.err_sum_x * Ki_ang)
+
+        if err_z != 0.0:
+            # 각도 정렬이 어느 정도 되었을 때만 직진
+            if abs(err_x) <= 100:
+                cmd.linear.x = float(err_z * Kp_lin + self.err_sum_z * Ki_lin)
+
+        # 최고 속도 제한 (안전용)
+        cmd.linear.x = max(-0.5, min(0.5, cmd.linear.x))
+        cmd.linear.y = max(-0.5, min(0.5, cmd.linear.y))
+
         # 돌을 잡을 수 있는 최적의 상태 도달 시
-        if cmd.linear.x == 0.0 and cmd.angular.z == 0.0:
+        if cmd.linear.x == 0.0 and cmd.linear.y == 0.0:
             self.get_logger().info("로버 정렬 완료! 돌 집기 준비 완료.")
             
         self.pub_cmd_vel.publish(cmd)
+
+        # PlotJuggler 디버깅 데이터 발행 (Vector3 활용)
+        # align_z -> x: 현재거리, y: 목표거리, z: 출력속도(linear.x)
+        self.pub_debug_z.publish(Vector3(x=float(z), y=float(self.target_z_distance), z=float(cmd.linear.x)))
+        # align_x -> x: 현재픽셀(u), y: 목표픽셀(center), z: 출력속도(angular.z)
+        self.pub_debug_x.publish(Vector3(x=float(u), y=float(self.image_center_x), z=float(cmd.linear.y)))
 
 def main(args=None):
     rclpy.init(args=args)
