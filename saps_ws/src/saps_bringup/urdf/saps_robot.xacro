@@ -108,7 +108,7 @@
     <parent link="base_link"/>
     <child link="camera_center_link"/>
     <!-- 로봇 앞쪽 중앙, 몸체 위 5cm에 위치. 실제 부착 위치에 맞게 자로 재서 수정하세요! -->
-    <origin xyz="${base_length/2 - 0.02} 0 ${base_height/2 + 0.02}" rpy="0 0 0"/>
+    <origin xyz="0.14 0 ${base_height/2 + 0.015}" rpy="0 0 0"/>
   </joint>
 
   <!-- 2. RealSense 드라이버가 기준점으로dd 사용하는 실제 '왼쪽 뎁스 렌즈'의 위치 -->
@@ -120,4 +120,7 @@
     <origin xyz="0 0.0475 0" rpy="0 0 0"/>
   </joint>
 
+  <!-- ####### Robot Arm ####### -->
+
+  
 </robot>

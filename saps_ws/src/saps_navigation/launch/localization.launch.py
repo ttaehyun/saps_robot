@@ -10,7 +10,7 @@ def generate_launch_description():
     saps_nav_dir = get_package_share_directory('saps_navigation')
 
     # 저장된 지도 파일 경로 (saps_navigation/maps 폴더)
-    map_path = '/home/a/saps_robot/saps_ws/src/saps_navigation/maps/third_map.yaml'
+    map_path = '/home/a/saps_robot/saps_ws/src/saps_navigation/maps/fifth_map.yaml'
 
     # Nav2 파라미터 파일 경로
     nav2_params_path = os.path.join(saps_nav_dir, 'config', 'nav2_params.yaml')

@@ -1,0 +1,422 @@
+<?xml version="1.0"?>
+<robot name="saps_robot" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- 로봇 크기 속성 (단위: m) -->
+  <xacro:property name="base_width" value="0.155"/>
+  <xacro:property name="base_length" value="0.29"/>
+  <xacro:property name="base_height" value="0.061"/>
+  <xacro:property name="wheel_radius" value="0.041"/>
+  <xacro:property name="wheel_width" value="0.0375"/>
+  
+  <!-- 바퀴 중심 위치 (MecanumbaseNode의 lx=0.096, ly=0.0875와 동일) -->
+  <xacro:property name="wheel_offset_x" value="0.096"/>
+  <xacro:property name="wheel_offset_y" value="0.0875"/>
+
+  <!-- 로봇 몸체 (base_link) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="${base_length} ${base_width} ${base_height}"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.1 0.3 0.8 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${base_length} ${base_width} ${base_height}"/>
+      </geometry>
+    </collision>
+  </link>
+
+  
+  <!-- 메카넘 휠 생성 매크로 -->
+  <xacro:macro name="mecanum_wheel" params="prefix x_reflect y_reflect">
+    <link name="${prefix}_wheel_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <material name="gray">
+          <color rgba="0.4 0.4 0.4 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${prefix}_wheel_link"/>
+      <origin xyz="${x_reflect * wheel_offset_x} ${y_reflect * wheel_offset_y} -0.015" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- 4개 바퀴 인스턴스화 (FL, FR, RL, RR) -->
+  <xacro:mecanum_wheel prefix="fl" x_reflect="1" y_reflect="1" />
+  <xacro:mecanum_wheel prefix="fr" x_reflect="1" y_reflect="-1" />
+  <xacro:mecanum_wheel prefix="rl" x_reflect="-1" y_reflect="1" />
+  <xacro:mecanum_wheel prefix="rr" x_reflect="-1" y_reflect="-1" />
+
+  <link name="imu_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.028 0.028 0.001"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.028 0.028 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 ${base_height/2 + 0.074}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ############ SENSORS ############ -->
+
+  <!-- Intel RealSense D455 Camera -->
+  <!-- 1. 카메라 외형의 정중앙을 나타내는 링크 (시각적 박스를 여기에 둡니다) -->
+  <link name="camera_center_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.025 0.110 0.025"/> <!-- D455 실제 크기 -->
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="camera_center_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_center_link"/>
+    <!-- 로봇 앞쪽 중앙, 몸체 위 5cm에 위치. 실제 부착 위치에 맞게 자로 재서 수정하세요! -->
+    <origin xyz="0.14 0 ${base_height/2 + 0.015}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 2. RealSense 드라이버가 기준점으로dd 사용하는 실제 '왼쪽 뎁스 렌즈'의 위치 -->
+  <link name="camera_link"/>
+  <joint name="camera_lens_joint" type="fixed">
+    <parent link="camera_center_link"/>
+    <child link="camera_link"/>
+    <!-- D455는 정중앙에서 왼쪽(y축 양의방향)으로 4.75cm 떨어진 곳에 기준 뎁스 렌즈가 있습니다 -->
+    <origin xyz="0 0.0475 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ####### Robot Arm ####### -->
+
+  <link name="link1">
+    <visual>
+      <geometry>
+          <mesh filename="package://robot_arm/meshes/arm.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+      <material name="white">
+          <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+          <mesh filename="package://robot_arm/meshes/arm.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+    </collision>
+  </link>
+  <link name="link2">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_arm/meshes/arm.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://robot_arm/meshes/arm.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+    </collision>
+  </link>
+  <link name="end_effector">
+      <visual>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/end_effector.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+          <material name="red">
+              <color rgba="1 0 0 1"/>
+          </material>
+      </visual>
+      <collision>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/end_effector.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+      </collision>
+  </link>
+  <link name="gripper_base_link">
+      <visual>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/hand_base.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+          <material name="white">
+              <color rgba="1 1 1 1"/>
+          </material>
+      </visual>
+      <collision>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/hand_base.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+      </collision>
+  </link>
+  
+  <link name="finger_left_frame">
+      <visual>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/finger_left_frame.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+          <material name="black">
+              <color rgba="0 0 0 1"/>
+          </material>
+      </visual>
+      <collision>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/finger_left_frame.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+      </collision>
+  </link>
+  <link name="finger_left_link">
+          <visual>
+              <geometry>
+                  <mesh filename="package://robot_arm/meshes/finger_right.stl" scale="0.001 0.001 0.001"/>
+              </geometry>
+              <origin xyz="0.0 0.0 0.0" rpy="0.0 -1.57 -1.57"/>
+              <material name="black">
+                  <color rgba="0 0 0 1"/>
+              </material>
+          </visual>
+          <collision>
+              <geometry>
+                  <mesh filename="package://robot_arm/meshes/finger_right.stl" scale="0.001 0.001 0.001"/>
+              </geometry>
+              <origin xyz="0.0 0.0 0.0" rpy="0.0 -1.57 -1.57"/>
+          </collision>
+  </link>
+  <link name="finger_right_frame">
+      <visual>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/finger_right_frame.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+          <material name="black">
+              <color rgba="0 0 0 1"/>
+          </material>
+      </visual>
+      <collision>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/finger_right_frame.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+      </collision>
+  </link>
+  <link name="finger_right_link">
+      <visual>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/finger_right.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+          <material name="black">
+              <color rgba="0 0 0 1"/>
+          </material>
+      </visual>
+      <collision>
+          <geometry>
+              <mesh filename="package://robot_arm/meshes/finger_right.stl" scale="0.001 0.001 0.001"/>
+          </geometry>
+          <origin xyz="0.0 0.0 0.0" rpy="0.0 1.57 1.57"/>
+      </collision>
+  </link>
+  <joint name="joint0" type="revolute">
+      <parent link="base_link"/>
+      <child link="bottom_frame"/>
+      <origin xyz="0.0 0.0 0.0468" rpy="0.0 0.0 0.0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
+  </joint>
+  <joint name="joint1" type="revolute">
+      <parent link="bottom_frame"/>
+      <child link="link1"/>
+      <origin xyz="0.0 0.0 0.0347" rpy="0.0 0.0 0.0"/>
+      <axis xyz="-1 0 0"/>
+      <limit lower="-2.1012" upper="0.0" effort="1.0" velocity="1.0"/>
+  </joint>
+  <joint name="joint2" type="revolute">
+      <parent link="link1"/>
+      <child link="link2"/>
+      <origin xyz="0.0 0.15 0.0" rpy="0.0 0.0 0.0"/>
+      <axis xyz="-1 0 0"/>
+      <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
+  </joint>
+  <joint name="joint3" type="revolute">
+      <parent link="link2"/>
+      <child link="end_effector"/>
+      <origin xyz="0.0 0.15 0.0" rpy="0.0 0.0 0.0"/>
+      <axis xyz="-1 0 0"/>
+      <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
+  </joint>
+  <joint name="gripper_joint" type="fixed">
+      <parent link="end_effector"/>
+      <child link="gripper_base_link"/>
+      <origin xyz="0.0 0.03 0.0" rpy="0.0 0.0 0.0"/>
+  </joint>
+  <joint name="gripper_left_joint" type="revolute">
+      <parent link="gripper_base_link"/>
+      <child link="finger_left_frame"/>
+      <origin xyz="0.012 0.024 0.0" rpy="0.0 0.0 0.0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-1.57" upper="0.0" effort="1.0" velocity="1.0"/>
+  </joint>
+  <joint name="gripper_left_hand" type="revolute">
+      <parent link="finger_left_frame"/>
+      <child link="finger_left_link"/>
+      <origin xyz="-0.009 0.03 0.0" rpy="0.0 0.0 0.0"/>
+      <axis xyz="0 0 1"/>
+      <mimic joint="gripper_left_joint" multiplier="-1" offset="0"/>
+      <limit lower="0.0" upper="1.57" effort="1.0" velocity="1.0"/>
+  </joint>
+  <joint name="gripper_right_joint" type="revolute">
+      <parent link="gripper_base_link"/>
+      <child link="finger_right_frame"/>
+      <origin xyz="-0.012 0.024 0.0" rpy="0.0 0.0 0.0"/>
+      <axis xyz="0 0 1"/>
+      <mimic joint="gripper_left_joint" multiplier="-1" offset="0"/>
+      <limit lower="0.0" upper="1.57" effort="1.0" velocity="1.0"/>
+  </joint>
+  <joint name="gripper_right_hand" type="revolute">
+      <parent link="finger_right_frame"/>
+      <child link="finger_right_link"/>
+      <origin xyz="0.009 0.03 0.0" rpy="0.0 0.0 0.0"/>
+      <axis xyz="0 0 1"/>
+      <mimic joint="gripper_right_joint" multiplier="-1" offset="0"/>
+      <limit lower="-1.57" upper="0.0" effort="1.0" velocity="1.0"/>
+  </joint>
+
+  <ros2_control name="DynamixelSystem" type="system">
+    <hardware>
+      <plugin>dynamixel_hardware_interface/DynamixelHardware</plugin>
+      
+        <param name="port_name">/dev/ttyUSB0</param>
+        <param name="baud_rate">1000000</param>
+        <param name="use_dummy">false</param>
+        <param name="protocol_version">1.0</param>
+        
+        <param name="dynamixel_model_folder">/param/dxl_model</param>
+
+        <param name="error_timeout_ms">5000</param>
+        
+        <param name="number_of_joints">5</param>
+        <param name="number_of_transmissions">5</param>
+
+        <param name="disable_torque_at_init">true</param>
+      </hardware>
+
+    <joint name="joint0">
+      <param name="id">0</param>
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint1">
+      <param name="id">1</param>
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint2">
+      <param name="id">2</param>
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="joint3">
+      <param name="id">3</param>
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="gripper_left_joint">
+      <param name="id">4</param>
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    
+    <gpio name="dxl_joint0">
+      <param name="type">dxl</param>
+      <param name="ID">0</param>
+      <command_interface name="Goal Position"/>
+      <state_interface name="Present Position"/>
+      <state_interface name="Present Velocity"/>
+      <param name="Return Delay Time">0</param>
+    </gpio>
+
+    <gpio name="dxl_joint1">
+      <param name="type">dxl</param>
+      <param name="ID">1</param>
+      <command_interface name="Goal Position"/>
+      <state_interface name="Present Position"/>
+      <state_interface name="Present Velocity"/>
+      <param name="Return Delay Time">0</param>
+    </gpio>
+
+    <gpio name="dxl_joint2">
+      <param name="type">dxl</param>
+      <param name="ID">2</param>
+      <command_interface name="Goal Position"/>
+      <state_interface name="Present Position"/>
+      <state_interface name="Present Velocity"/>
+      <param name="Return Delay Time">0</param>
+    </gpio>
+
+    <gpio name="dxl_joint3">
+      <param name="type">dxl</param>
+      <param name="ID">3</param>
+      <command_interface name="Goal Position"/>
+      <state_interface name="Present Position"/>
+      <state_interface name="Present Velocity"/>
+      <param name="Return Delay Time">0</param>
+    </gpio>
+
+    <gpio name="dxl_joint4">
+      <param name="type">dxl</param>
+      <param name="ID">4</param>
+      <command_interface name="Goal Position"/>
+      <state_interface name="Present Position"/>
+      <state_interface name="Present Velocity"/>
+      <param name="Return Delay Time">0</param>
+    </gpio>
+  </ros2_control>
+</robot>
