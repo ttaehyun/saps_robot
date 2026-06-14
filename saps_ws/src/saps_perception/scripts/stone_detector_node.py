@@ -7,6 +7,8 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import math
+from nav_msgs.msg import Odometry
 
 class StoneDetectorNode(Node):
     def __init__(self):
@@ -23,6 +25,12 @@ class StoneDetectorNode(Node):
         
         # 최신 뎁스 이미지 캐싱용
         self.latest_depth_img = None
+        
+        # Yaw 유지(Heading Hold)를 위한 오도메트리 구독
+        self.sub_odom = self.create_subscription(
+            Odometry, '/odometry/filtered', self.odom_cb, 10)
+        self.current_yaw = 0.0
+        self.target_yaw = None
         
         # 토픽 구독
         self.sub_cam_info = self.create_subscription(
@@ -47,11 +55,18 @@ class StoneDetectorNode(Node):
         # PI 제어기용 적분 및 시간 변수
         self.err_sum_x = 0.0
         self.err_sum_z = 0.0
+        self.err_sum_yaw = 0.0
         self.last_time = None
 
         # PlotJuggler 디버깅용 퍼블리셔
         self.pub_debug_z = self.create_publisher(Vector3, '/debug/align_z', 10)
         self.pub_debug_x = self.create_publisher(Vector3, '/debug/align_x', 10)
+
+    def odom_cb(self, msg):
+        q = msg.pose.pose.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
 
     def cam_info_cb(self, msg):
         # 1회만 받아오면 됩니다. fx, fy, cx, cy 파라미터 추출
@@ -146,10 +161,18 @@ class StoneDetectorNode(Node):
         if dt > 1.0: # 타겟을 놓쳤다가 오랜만에 찾은 경우 적분기 초기화
             self.err_sum_x = 0.0
             self.err_sum_z = 0.0
+            self.err_sum_yaw = 0.0
+            self.target_yaw = self.current_yaw # 추적 시작 시점의 차체 각도(차선 일직선) 기억
             dt = 0.03
 
         err_x = self.image_center_x - u
         err_z = z - self.target_z_distance
+        
+        if self.target_yaw is None:
+            self.target_yaw = self.current_yaw
+            
+        err_yaw = self.target_yaw - self.current_yaw
+        err_yaw = math.atan2(math.sin(err_yaw), math.cos(err_yaw)) # -pi ~ pi 정규화
 
         # 허용 오차 (Deadband) 설정 및 적분(I) 업데이트
         if abs(err_x) <= 10:
@@ -164,29 +187,41 @@ class StoneDetectorNode(Node):
         else:
             self.err_sum_z += err_z * dt
 
+        if abs(err_yaw) <= 0.03: # 약 1.7도 이내면 각도 회전 정지
+            err_yaw = 0.0
+            self.err_sum_yaw = 0.0
+        else:
+            self.err_sum_yaw += err_yaw * dt
+
         # Anti-windup (적분기 누적 한계 설정 - 로봇이 미쳐 날뛰는 것 방지)
         self.err_sum_x = max(-500.0, min(500.0, self.err_sum_x))
         self.err_sum_z = max(-1.0, min(1.0, self.err_sum_z))
+        self.err_sum_yaw = max(-0.5, min(0.5, self.err_sum_yaw))
 
         # PI 제어 게인 (테스트하며 조절 필요)
-        Kp_ang, Ki_ang = 0.001, 0.0
-        Kp_lin, Ki_lin = 0.4, 0.02
+        Kp_ang_y, Ki_ang_y = 0.001, 0.0     # 측면 이동 (Y)
+        Kp_lin_x, Ki_lin_x = 0.4, 0.02      # 전진 이동 (X)
+        Kp_yaw, Ki_yaw = 0.8, 0.05          # 차체 각도 교정 (Yaw)
 
-        # 제어 명령 계산1
+        # 제어 명령 계산
         if err_x != 0.0:
-            cmd.linear.y = float(err_x * Kp_ang + self.err_sum_x * Ki_ang)
+            cmd.linear.y = float(err_x * Kp_ang_y + self.err_sum_x * Ki_ang_y)
 
         if err_z != 0.0:
             # 각도 정렬이 어느 정도 되었을 때만 직진
             if abs(err_x) <= 100:
-                cmd.linear.x = float(err_z * Kp_lin + self.err_sum_z * Ki_lin)
+                cmd.linear.x = float(err_z * Kp_lin_x + self.err_sum_z * Ki_lin_x)
+                
+        if err_yaw != 0.0:
+            cmd.angular.z = float(err_yaw * Kp_yaw + self.err_sum_yaw * Ki_yaw)
 
         # 최고 속도 제한 (안전용)
         cmd.linear.x = max(-0.5, min(0.5, cmd.linear.x))
         cmd.linear.y = max(-0.5, min(0.5, cmd.linear.y))
+        cmd.angular.z = max(-0.5, min(0.5, cmd.angular.z))
 
         # 돌을 잡을 수 있는 최적의 상태 도달 시
-        if cmd.linear.x == 0.0 and cmd.linear.y == 0.0:
+        if cmd.linear.x == 0.0 and cmd.linear.y == 0.0 and cmd.angular.z == 0.0:
             self.get_logger().info("로버 정렬 완료! 돌 집기 준비 완료.")
             
         self.pub_cmd_vel.publish(cmd)

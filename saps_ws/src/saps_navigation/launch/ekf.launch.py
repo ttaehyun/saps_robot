@@ -14,14 +14,14 @@ def generate_launch_description():
         # 1. 아두이노 통신 및 엔코더 오도메트리 노드
         Node(
             package='saps_base',
-            executable='mecanum_base_node',
+            executable='mecanumBaseNode.py',
             name='mecanum_base_node'
         ),
 
         # 2. MPU6050 IMU 센서 노드
         Node(
             package='saps_base',
-            executable='icm20948_node',
+            executable='icm20948_node.py',
             name='icm20948_node'
         ),
         # Node(

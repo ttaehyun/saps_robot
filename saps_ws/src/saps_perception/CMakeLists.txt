@@ -18,6 +18,7 @@ install(DIRECTORY
 )
 
 install(PROGRAMS
+  scripts/detector_test.py
   scripts/stone_detector_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
