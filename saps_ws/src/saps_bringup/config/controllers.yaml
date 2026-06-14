@@ -1,0 +1,30 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # 50Hz 주기
+
+    # 현재 모터 위치를 읽어오는 컨트롤러
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    # 모터에 목표 위치를 보내는 컨트롤러
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint0
+      - joint1
+      - joint2
+      - joint3
+      - gripper_left_joint
+
+    
+    interface_name: position
+    
+    command_interfaces:
+      - position
+      
+    state_interfaces:
+      - position
+      - velocity
