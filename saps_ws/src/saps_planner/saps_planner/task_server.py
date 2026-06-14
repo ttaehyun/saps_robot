@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import time
 import rclpy
 from rclpy.action import ActionServer, ActionClient, CancelResponse
@@ -7,7 +8,11 @@ from rclpy.executors import MultiThreadedExecutor
 
 # saps_interfaces에서 빌드한 RobotTask 액션을 임포트
 from saps_interfaces.action import RoverCommand
-from geometry_msgs.msg import PoseStamped
+from nav2_msgs.action import NavigateToPose
+from action_msgs.msg import GoalStatus
+
+# ros2 action send_goal /rover_command saps_interfaces/action/RoverCommand "{command: 'start', x: 1.48, y: 0.67}" -f
+
 class LocalTaskPlanner(Node):
     def __init__(self):
         super().__init__('local_task_planner')
@@ -24,7 +29,21 @@ class LocalTaskPlanner(Node):
             callback_group=self.callback_group
         )
 
-        self.goal_pose_pub = self.create_publisher(PoseStamped, '/goal_pose', 10)
+        # Nav2 목표 지점 이동을 위한 Action Client 구성
+        self.nav_to_pose_client = ActionClient(
+            self,
+            NavigateToPose,
+            'navigate_to_pose',
+            callback_group=self.callback_group
+        )
+
+        # 돌 정렬(Align)을 위한 Action Client 구성
+        self.align_stone_client = ActionClient(
+            self,
+            RoverCommand,
+            '/align_stone',
+            callback_group=self.callback_group
+        )
 
         self.get_logger().info('Local Task Planner (Director Node) started. Waiting for goals...')
         
@@ -67,40 +86,105 @@ class LocalTaskPlanner(Node):
         return result
 
     async def execute_patrol_sequence(self, goal_handle, feedback_msg):
-        # [시퀀스 1] A 지점 이동 (추후 Nav2 Action Client 호출 로직으로 대체)
-        feedback_msg.status = 'Moving to Point A (Nav2...)'
-        feedback_msg.progress = 33.3
         target_x = goal_handle.request.x
         target_y = goal_handle.request.y
-        self.get_logger().error(f'(Target: x={target_x}, y={target_y}) ---')
+
+        # [시퀀스 1] A 지점 이동 (Nav2 Action Client 호출)
+        feedback_msg.status = f'Moving to Point A (x={target_x}, y={target_y}) via Nav2...'
+        feedback_msg.progress = 10.0
         goal_handle.publish_feedback(feedback_msg)
         self.get_logger().info(feedback_msg.status)
         
-        # time.sleep() 대신 짧게 대기하며 취소 요청(is_cancel_requested)을 주기적으로 확인합니다.
-        for _ in range(20):
+        # Nav2 서버 연결 대기
+        if not self.nav_to_pose_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error('Nav2 navigate_to_pose action server not available!')
+            return 'FAILED'
+
+        # Nav2 목표 설정
+        nav_goal = NavigateToPose.Goal()
+        nav_goal.pose.header.frame_id = 'map'
+        nav_goal.pose.header.stamp = self.get_clock().now().to_msg()
+        nav_goal.pose.pose.position.x = float(target_x)
+        nav_goal.pose.pose.position.y = float(target_y)
+        nav_goal.pose.pose.orientation.w = 1.0  # 기본 방향(회전 없음) 설정
+
+        # 비동기로 목표 전송
+        send_goal_future = self.nav_to_pose_client.send_goal_async(nav_goal)
+        while rclpy.ok() and not send_goal_future.done():
             if goal_handle.is_cancel_requested:
-                feedback_msg.status = 'Mission Canceled by Client (during Move to Point A).'
-                goal_handle.publish_feedback(feedback_msg)
-                self.get_logger().info(feedback_msg.status)
-                # 취소 요청 시 모터 정지 등 필요한 정리 작업을 여기에 추가하세요.
+                send_goal_future.cancel()
                 return 'CANCELED'
-            time.sleep(0.1) # 실제로는 Nav2 이동 중 상태를 확인하며 대기
+            time.sleep(0.1)
+            
+        nav_goal_handle = send_goal_future.result()
+        if not nav_goal_handle.accepted:
+            self.get_logger().error('Nav2 goal was rejected by server')
+            return 'FAILED'
+            
+        # Nav2 동작 완료 대기 및 지속적인 취소 상태 체크
+        result_future = nav_goal_handle.get_result_async()
+        while rclpy.ok() and not result_future.done():
+            if goal_handle.is_cancel_requested:
+                self.get_logger().info('Cancel requested, forwarding cancellation to Nav2...')
+                cancel_future = nav_goal_handle.cancel_goal_async()
+                while rclpy.ok() and not cancel_future.done():
+                    time.sleep(0.1)
+                self.get_logger().info('Nav2 goal successfully canceled.')
+                return 'CANCELED'
+            time.sleep(0.1)
+
+        # 결과 확인
+        nav_result = result_future.result()
+        if nav_result.status != GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().error(f'Navigation failed with status: {nav_result.status}')
+            return 'FAILED'
         
-        # [시퀀스 2] 주변 스캔 및 사진 촬영 등 특정 액션
-        feedback_msg.status = 'Scanning area...'
+        self.get_logger().info('Navigation to Target Succeeded!')
+        
+        # [시퀀스 2] 돌과 차량 정렬 액션 호출
+        feedback_msg.status = 'Aligning to stone...'
         feedback_msg.progress = 66.6
         goal_handle.publish_feedback(feedback_msg)
         self.get_logger().info(feedback_msg.status)
         
-        for _ in range(50):
+        if not self.align_stone_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error('Align stone action server not available!')
+            return 'FAILED'
+
+        align_goal = RoverCommand.Goal()
+        align_goal.command = 'align'
+
+        align_goal_future = self.align_stone_client.send_goal_async(align_goal)
+        while rclpy.ok() and not align_goal_future.done():
             if goal_handle.is_cancel_requested:
-                feedback_msg.status = 'Mission Canceled by Client (during Scanning).'
-                goal_handle.publish_feedback(feedback_msg)
-                self.get_logger().info(feedback_msg.status)
+                align_goal_future.cancel()
+                return 'CANCELED'
+            time.sleep(0.1)
+            
+        align_goal_handle = align_goal_future.result()
+        if not align_goal_handle.accepted:
+            self.get_logger().error('Align stone goal was rejected by server')
+            return 'FAILED'
+            
+        align_result_future = align_goal_handle.get_result_async()
+        while rclpy.ok() and not align_result_future.done():
+            if goal_handle.is_cancel_requested:
+                self.get_logger().info('Cancel requested, forwarding cancellation to Align server...')
+                cancel_future = align_goal_handle.cancel_goal_async()
+                while rclpy.ok() and not cancel_future.done():
+                    time.sleep(0.1)
+                self.get_logger().info('Align goal successfully canceled.')
                 return 'CANCELED'
             time.sleep(0.1)
 
-        feedback_msg.status = 'Patrol Complete. Returning to standby.'
+        align_result = align_result_future.result().result
+        if not align_result.success:
+            self.get_logger().error(f'Alignment failed: {align_result.message}')
+            return 'FAILED'
+        
+        self.get_logger().info('Alignment to Stone Succeeded!')
+
+        feedback_msg.status = 'Mission Complete. Stone Aligned.'
         feedback_msg.progress = 100.0
         goal_handle.publish_feedback(feedback_msg)
         return 'SUCCESS'

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
+import time
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionServer, CancelResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from saps_interfaces.action import RoverCommand
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PointStamped, Twist, Vector3
 from cv_bridge import CvBridge
@@ -20,6 +25,16 @@ class StoneDetectorNode(Node):
         #self.yolo_model = YOLO('saps_ws/src/saps_perception/model/best.pt')
         self.yolo_model = YOLO('/home/a/saps_robot/saps_ws/src/saps_perception/model/best.engine', task='detect')
         
+        self.callback_group = ReentrantCallbackGroup()
+        self._action_server = ActionServer(
+            self,
+            RoverCommand,
+            '/align_stone', # 비전 정렬을 위한 액션 이름 (task_server와 구분)
+            execute_callback=self.execute_callback,
+            cancel_callback=self.cancel_callback,
+            callback_group=self.callback_group
+        )
+
         # Camera Info 캐싱용 변수
         self.camera_info = None
         
@@ -28,19 +43,19 @@ class StoneDetectorNode(Node):
         
         # Yaw 유지(Heading Hold)를 위한 오도메트리 구독
         self.sub_odom = self.create_subscription(
-            Odometry, '/odometry/filtered', self.odom_cb, 10)
+            Odometry, '/odometry/filtered', self.odom_cb, 10, callback_group=self.callback_group)
         self.current_yaw = 0.0
         self.target_yaw = None
         
         # 토픽 구독
         self.sub_cam_info = self.create_subscription(
-            CameraInfo, '/rover/camera/aligned_depth_to_color/camera_info', self.cam_info_cb, 10)
+            CameraInfo, '/rover/camera/aligned_depth_to_color/camera_info', self.cam_info_cb, 10, callback_group=self.callback_group)
         
         self.sub_depth = self.create_subscription(
-            Image, '/rover/camera/aligned_depth_to_color/image_raw', self.depth_cb, 10)
+            Image, '/rover/camera/aligned_depth_to_color/image_raw', self.depth_cb, 10, callback_group=self.callback_group)
             
         self.sub_color = self.create_subscription(
-            Image, '/rover/camera/color/image_raw', self.color_cb, 10)
+            Image, '/rover/camera/color/image_raw', self.color_cb, 10, callback_group=self.callback_group)
             
         # 돌의 3D 좌표 퍼블리셔 (로봇팔 전달용)
         self.pub_stone_point = self.create_publisher(PointStamped, '/rover/stone_3d_point', 10)
@@ -61,6 +76,10 @@ class StoneDetectorNode(Node):
         # PlotJuggler 디버깅용 퍼블리셔
         self.pub_debug_z = self.create_publisher(Vector3, '/debug/align_z', 10)
         self.pub_debug_x = self.create_publisher(Vector3, '/debug/align_x', 10)
+
+        # Action Server 상태 변수
+        self.is_aligning = False
+        self.align_success = False
 
     def odom_cb(self, msg):
         q = msg.pose.pose.orientation
@@ -110,8 +129,8 @@ class StoneDetectorNode(Node):
                 
         # 돌이 탐지되지 않았을 때도 카메라 화면을 업데이트해서 보여주기 위함
         
-        cv2.imshow("Stone Detection", cv_image)
-        cv2.waitKey(1)
+        # cv2.imshow("Stone Detection", cv_image)
+        # cv2.waitKey(1)
 
     def process_stone_detection(self, u, v, cv_image):
         # 1. Depth 이미지에서 (u, v) 픽셀의 깊이값(mm -> m) 추출
@@ -146,8 +165,49 @@ class StoneDetectorNode(Node):
         # cv2.imshow("Stone Detection", cv_image)
         # cv2.waitKey(1)
 
+    def cancel_callback(self, goal_handle):
+        self.get_logger().info('Received cancel request for alignment')
+        return CancelResponse.ACCEPT
+
+    def execute_callback(self, goal_handle):
+        self.get_logger().info('--- Alignment Mission Started ---')
+        
+        # 제어 상태 초기화
+        self.is_aligning = True
+        self.align_success = False
+        self.target_yaw = None
+        self.last_time = None
+        self.err_sum_x = 0.0
+        self.err_sum_z = 0.0
+        self.err_sum_yaw = 0.0
+
+        feedback_msg = RoverCommand.Feedback()
+        
+        # 정렬 완료 상태가 될 때까지 대기
+        while rclpy.ok() and not self.align_success:
+            if goal_handle.is_cancel_requested:
+                self.is_aligning = False
+                goal_handle.canceled()
+                self.get_logger().warn('Alignment Canceled')
+                self.pub_cmd_vel.publish(Twist()) # 취소 시 정지
+                return RoverCommand.Result(success=False, message='Canceled')
+            
+            feedback_msg.status = 'Aligning to stone...'
+            goal_handle.publish_feedback(feedback_msg)
+            time.sleep(0.1)
+
+        self.is_aligning = False
+        goal_handle.succeed()
+        self.get_logger().info('--- Alignment Mission Succeeded ---')
+        
+        return RoverCommand.Result(success=True, message='Alignment Complete')
+
     def align_rover_to_stone(self, u, z):
         """돌을 중앙에 맞추고 목표 거리로 이동하는 PI 제어기"""
+        if not self.is_aligning:
+            # 미션 수행 중이 아닐 때는 제어 명령을 내보내지 않습니다.
+            return
+
         cmd = Twist()
         
         now = self.get_clock().now()
@@ -199,7 +259,7 @@ class StoneDetectorNode(Node):
         self.err_sum_yaw = max(-0.5, min(0.5, self.err_sum_yaw))
 
         # PI 제어 게인 (테스트하며 조절 필요)
-        Kp_ang_y, Ki_ang_y = 0.001, 0.0     # 측면 이동 (Y)
+        Kp_ang_y, Ki_ang_y = 0.001, 0.0005    # 측면 이동 (Y)
         Kp_lin_x, Ki_lin_x = 0.4, 0.02      # 전진 이동 (X)
         Kp_yaw, Ki_yaw = 0.8, 0.05          # 차체 각도 교정 (Yaw)
 
@@ -222,6 +282,7 @@ class StoneDetectorNode(Node):
 
         # 돌을 잡을 수 있는 최적의 상태 도달 시
         if cmd.linear.x == 0.0 and cmd.linear.y == 0.0 and cmd.angular.z == 0.0:
+            self.align_success = True
             self.get_logger().info("로버 정렬 완료! 돌 집기 준비 완료.")
             
         self.pub_cmd_vel.publish(cmd)
@@ -235,7 +296,11 @@ class StoneDetectorNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = StoneDetectorNode()
-    rclpy.spin(node)
+    executor = MultiThreadedExecutor()
+    try:
+        rclpy.spin(node, executor=executor)
+    except KeyboardInterrupt:
+        pass
     node.destroy_node()
     cv2.destroyAllWindows()
     rclpy.shutdown()
